@@ -1,0 +1,23 @@
+[package]
+name = "base-idp"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Square Experience Base IdP SDK for Rust gateways and services."
+homepage = "https://squareexp.com"
+repository = "https://github.com/squareexp/base-idp-rust"
+readme = "README.md"
+
+[features]
+default = ["reqwest"]
+reqwest = ["dep:reqwest"]
+
+[dependencies]
+base64 = "0.22"
+chrono = { version = "0.4", features = ["clock", "serde"] }
+ed25519-dalek = "2"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+url = "2"
