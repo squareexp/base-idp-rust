@@ -1,0 +1,46 @@
+name: Release Base IdP Rust SDK
+
+on:
+  push:
+    tags:
+      - 'sdk-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish Rust SDK assets
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Test crate
+        run: cargo test --locked
+
+      - name: Package crate and source archive
+        run: |
+          set -euo pipefail
+          rm -rf release
+          mkdir -p release
+          cargo package --allow-dirty --no-verify
+          crate_file="$(find target/package -maxdepth 1 -name '*.crate' | sort | tail -n1)"
+          cp "$crate_file" "release/base-idp-rust-sdk-${GITHUB_REF_NAME}.crate"
+          tar -czf "release/base-idp-rust-sdk-${GITHUB_REF_NAME}.tar.gz" \
+            --exclude=.git \
+            --exclude=release \
+            --exclude=target \
+            -C . .
+
+      - name: Upload GitHub Release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: release/*
+          generate_release_notes: true
