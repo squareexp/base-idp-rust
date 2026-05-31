@@ -2,30 +2,33 @@ use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 use crate::{
-    authorize_url, verify_paseto_v4_public, AuthorizeOptions, Config, Error, Metadata, Principal,
-    PublicKeySet, RefreshOptions, TokenOptions, TokenPair, VerifyOptions,
+    authorize_url, verify_paseto_v4_public, AuthorizeOptions, ClientConfigResponse, Config, Error,
+    Metadata, Principal, PublicKeySet, RefreshOptions, TokenOptions, TokenPair, VerifyOptions,
 };
 
 #[derive(Clone)]
-pub struct SquareIdpClient {
-    config: Config,
+pub struct BaseIdPClient {
+    config: Arc<RwLock<Config>>,
     http: reqwest::Client,
     metadata_cache: Arc<RwLock<Option<Metadata>>>,
     key_cache: Arc<RwLock<Option<(PublicKeySet, Instant)>>>,
     key_cache_ttl: Duration,
 }
 
-impl SquareIdpClient {
+impl BaseIdPClient {
     pub fn new(config: Config) -> Result<Self, Error> {
-        let config = config.normalized();
-        if config.issuer.is_empty() || config.client_id.is_empty() || config.redirect_uri.is_empty()
-        {
+        if config.key.is_empty() {
             return Err(Error::InvalidConfig(
-                "issuer, client_id, and redirect_uri are required".to_string(),
+                "base key is required (set BASE_IDP_KEY)".to_string(),
+            ));
+        }
+        if config.issuer.is_empty() {
+            return Err(Error::InvalidConfig(
+                "issuer is required (set BASE_IDP_ISSUER)".to_string(),
             ));
         }
         Ok(Self {
-            config,
+            config: Arc::new(RwLock::new(config)),
             http: reqwest::Client::new(),
             metadata_cache: Arc::new(RwLock::new(None)),
             key_cache: Arc::new(RwLock::new(None)),
@@ -43,12 +46,65 @@ impl SquareIdpClient {
         self
     }
 
-    pub fn config(&self) -> &Config {
-        &self.config
+    pub async fn resolve_config(&self) -> Result<Config, Error> {
+        let mut cfg = self.config.write().map_err(|err| {
+            Error::InvalidConfig(format!("lock poisoned: {err}"))
+        })?;
+        if cfg.resolved {
+            return Ok(cfg.clone());
+        }
+
+        let url = format!(
+            "{}/v1/client-config?key={}",
+            cfg.issuer.trim_end_matches('/'),
+            urlencoding(&cfg.key)
+        );
+
+        let response: ClientConfigResponse = self
+            .http
+            .get(&url)
+            .header("Accept", "application/json")
+            .send()
+            .await
+            .map_err(|err| Error::ConfigDiscovery(err.to_string()))?
+            .error_for_status()
+            .map_err(|err| Error::ConfigDiscovery(err.to_string()))?
+            .json()
+            .await
+            .map_err(|err| Error::ConfigDiscovery(err.to_string()))?;
+
+        cfg.issuer = response.issuer.trim_end_matches('/').to_string();
+        cfg.client_id = response.client_id;
+        cfg.confidential = response.confidential;
+        cfg.allowed_scopes = response.allowed_scopes.clone();
+        if cfg.redirect_uri.is_empty() {
+            cfg.redirect_uri = response
+                .allowed_redirect_uris
+                .first()
+                .cloned()
+                .unwrap_or_default();
+        }
+        if cfg.scopes.is_empty() {
+            cfg.scopes = response.allowed_scopes;
+        }
+        if cfg.audience.is_empty() {
+            cfg.audience = crate::DEFAULT_AUDIENCE.to_string();
+        }
+        cfg.resolved = true;
+
+        Ok(cfg.clone())
     }
 
     pub fn authorize_url(&self, options: AuthorizeOptions) -> Result<String, Error> {
-        authorize_url(&self.config, options)
+        let cfg = self.config.read().map_err(|err| {
+            Error::InvalidConfig(format!("lock poisoned: {err}"))
+        })?;
+        if !cfg.resolved {
+            return Err(Error::InvalidConfig(
+                "client not resolved; call resolve_config() first or use an async method".to_string(),
+            ));
+        }
+        authorize_url(&cfg, options)
     }
 
     pub async fn discovery(&self, force: bool) -> Result<Metadata, Error> {
@@ -63,9 +119,10 @@ impl SquareIdpClient {
             }
         }
 
+        let cfg = self.config.read().map_err(|_| Error::InvalidConfig("lock poisoned".to_string()))?;
         let endpoint = format!(
             "{}/.well-known/square-identity",
-            self.config.issuer.trim_end_matches('/')
+            cfg.issuer.trim_end_matches('/')
         );
         let metadata = self
             .http
@@ -123,23 +180,25 @@ impl SquareIdpClient {
     }
 
     pub async fn exchange_code(&self, options: TokenOptions) -> Result<TokenPair, Error> {
+        self.resolve_config().await?;
         if options.code.is_empty() {
             return Err(Error::TokenExchange(
                 "authorization code is required".to_string(),
             ));
         }
+        let cfg = self.config.read().map_err(|_| Error::InvalidConfig("lock poisoned".to_string()))?;
         let mut form = vec![
             ("grant_type", "authorization_code".to_string()),
             ("code", options.code),
-            ("client_id", self.config.client_id.clone()),
+            ("client_id", cfg.client_id.clone()),
             (
                 "redirect_uri",
                 options
                     .redirect_uri
-                    .unwrap_or_else(|| self.config.redirect_uri.clone()),
+                    .unwrap_or_else(|| cfg.redirect_uri.clone()),
             ),
         ];
-        if let Some(secret) = &self.config.client_secret {
+        if let Some(secret) = &cfg.secret {
             form.push(("client_secret", secret.clone()));
         }
         if let Some(verifier) = options.code_verifier {
@@ -149,17 +208,19 @@ impl SquareIdpClient {
     }
 
     pub async fn refresh(&self, options: RefreshOptions) -> Result<TokenPair, Error> {
+        self.resolve_config().await?;
         if options.refresh_token.is_empty() {
             return Err(Error::TokenExchange(
                 "refresh token is required".to_string(),
             ));
         }
+        let cfg = self.config.read().map_err(|_| Error::InvalidConfig("lock poisoned".to_string()))?;
         let mut form = vec![
             ("grant_type", "refresh_token".to_string()),
             ("refresh_token", options.refresh_token),
-            ("client_id", self.config.client_id.clone()),
+            ("client_id", cfg.client_id.clone()),
         ];
-        if let Some(secret) = &self.config.client_secret {
+        if let Some(secret) = &cfg.secret {
             form.push(("client_secret", secret.clone()));
         }
         if let Some(scopes) = options.scopes {
@@ -173,8 +234,10 @@ impl SquareIdpClient {
         token: &str,
         options: VerifyOptions,
     ) -> Result<Principal, Error> {
+        self.resolve_config().await?;
         let keys = self.public_keys(false).await?;
-        verify_paseto_v4_public(token, &keys, &self.config, options)
+        let cfg = self.config.read().map_err(|_| Error::InvalidConfig("lock poisoned".to_string()))?;
+        verify_paseto_v4_public(token, &keys, &cfg, options)
     }
 
     async fn post_token(&self, form: Vec<(&str, String)>) -> Result<TokenPair, Error> {
@@ -192,4 +255,8 @@ impl SquareIdpClient {
             .await
             .map_err(|err| Error::TokenExchange(err.to_string()))
     }
+}
+
+fn urlencoding(value: &str) -> String {
+    url::form_urlencoded::byte_serialize(value.as_bytes()).collect()
 }

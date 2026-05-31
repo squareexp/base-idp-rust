@@ -5,43 +5,91 @@ pub const DEFAULT_IMPLICIT_ASSERTION: &str = "square-experience:idp:access:v1";
 
 #[derive(Clone, Debug)]
 pub struct Config {
+    pub key: String,
+    pub secret: Option<String>,
     pub issuer: String,
+
     pub client_id: String,
-    pub client_secret: Option<String>,
     pub redirect_uri: String,
     pub scopes: Vec<String>,
     pub audience: String,
     pub required_scope: Option<String>,
+    pub confidential: bool,
+    pub allowed_scopes: Vec<String>,
+    pub resolved: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ClientConfigResponse {
+    pub client_id: String,
+    #[serde(default)]
+    pub anon_key: String,
+    #[serde(default)]
+    pub product: String,
+    #[serde(default)]
+    pub display_name: String,
+    #[serde(default)]
+    pub app_domain: String,
+    #[serde(default)]
+    pub logo_url: Option<String>,
+    pub issuer: String,
+    pub authorization_endpoint: String,
+    pub token_endpoint: String,
+    pub paseto_public_key_endpoint: String,
+    #[serde(default)]
+    pub allowed_redirect_uris: Vec<String>,
+    #[serde(default)]
+    pub allowed_scopes: Vec<String>,
+    #[serde(default)]
+    pub allowed_auth_methods: Vec<String>,
+    #[serde(default)]
+    pub requested_claims: Vec<String>,
+    #[serde(default)]
+    pub confidential: bool,
+    #[serde(default)]
+    pub status: String,
 }
 
 impl Config {
     pub fn from_env() -> Result<Self, crate::Error> {
         Ok(Self {
+            key: required_env("BASE_IDP_KEY")?,
             issuer: required_env("BASE_IDP_ISSUER")?
                 .trim_end_matches('/')
                 .to_string(),
-            client_id: required_env("BASE_IDP_CLIENT_ID")?,
-            client_secret: std::env::var("BASE_IDP_CLIENT_SECRET")
+            secret: std::env::var("BASE_IDP_CLIENT_SECRET")
                 .ok()
-                .filter(|value| !value.is_empty()),
-            redirect_uri: required_env("BASE_IDP_REDIRECT_URI")?,
-            scopes: split_scopes(
-                &std::env::var("BASE_IDP_SCOPES").unwrap_or_else(|_| "openid profile".to_string()),
-            ),
-            audience: std::env::var("BASE_IDP_AUDIENCE")
-                .unwrap_or_else(|_| DEFAULT_AUDIENCE.to_string()),
-            required_scope: std::env::var("BASE_IDP_REQUIRED_SCOPE")
-                .ok()
-                .filter(|value| !value.is_empty()),
+                .filter(|value| !value.is_empty())
+                .or_else(|| {
+                    std::env::var("BASE_IDP_SECRET")
+                        .ok()
+                        .filter(|value| !value.is_empty())
+                }),
+            client_id: String::new(),
+            redirect_uri: String::new(),
+            scopes: Vec::new(),
+            audience: String::new(),
+            required_scope: None,
+            confidential: false,
+            allowed_scopes: Vec::new(),
+            resolved: false,
         })
     }
 
-    pub fn normalized(mut self) -> Self {
-        self.issuer = self.issuer.trim_end_matches('/').to_string();
-        if self.audience.is_empty() {
-            self.audience = DEFAULT_AUDIENCE.to_string();
+    pub fn new(key: &str, issuer: &str) -> Self {
+        Self {
+            key: key.to_string(),
+            issuer: issuer.trim_end_matches('/').to_string(),
+            secret: None,
+            client_id: String::new(),
+            redirect_uri: String::new(),
+            scopes: Vec::new(),
+            audience: String::new(),
+            required_scope: None,
+            confidential: false,
+            allowed_scopes: Vec::new(),
+            resolved: false,
         }
-        self
     }
 }
 
@@ -52,6 +100,7 @@ pub struct AuthorizeOptions {
     pub nonce: Option<String>,
     pub scopes: Option<Vec<String>>,
     pub redirect_uri: Option<String>,
+    pub auth_session_id: Option<String>,
     pub code_challenge: Option<String>,
     pub code_challenge_method: Option<String>,
     pub additional_parameters: Vec<(String, String)>,

@@ -1,4 +1,4 @@
-# Square Base IDP Rust SDK
+# Base IdP Rust SDK
 
 Rust SDK for Base identity integration in backend services and gateways.
 
@@ -7,7 +7,7 @@ Rust SDK for Base identity integration in backend services and gateways.
 Before publishing:
 
 ```toml
-square-idp-sdk = { path = "../base/sdk/rust" }
+base-idp = { path = "../base/sdk/rust" }
 ```
 
 After publishing, replace with crates.io version.
@@ -20,18 +20,41 @@ BASE_IDP_CLIENT_ID=<your-client-id>
 BASE_IDP_CLIENT_SECRET=<your-client-secret-if-confidential>
 BASE_IDP_REDIRECT_URI=<exact-registered-callback-url>
 BASE_IDP_SCOPES="openid profile <product>:read <product>:write"
+BASE_IDP_ALLOWED_AUTH_METHODS="password magic_link"
+BASE_IDP_REQUESTED_CLAIMS="email profile"
 BASE_IDP_AUDIENCE=square-experience
 ```
 
 Get these values from Base client registration.
+`BASE_IDP_SECRET` remains a backward-compatible alias in some SDKs, but `BASE_IDP_CLIENT_SECRET` is the preferred secret name.
+
+## Fast Init
+
+The TypeScript SDK ships with a bootstrap CLI that can generate the exact client-registration payload and env block used by Base:
+
+```bash
+npx base-idp init \
+  --client-id console-gateway \
+  --display-name "Base Console" \
+  --product console \
+  --app-domain console.cloud.squareexp.com \
+  --redirect-uri http://localhost:3010/api/auth/callback \
+  --allowed-redirect-uris http://localhost:3010/api/auth/callback \
+  --allowed-origins http://localhost:3010 \
+  --allowed-scopes "openid profile console:manage" \
+  --allowed-auth-methods password,magic_link \
+  --requested-claims email,profile
+```
+
+Use `--post --admin-token <token>` to register the client through the Base admin API.
 
 ## Verify Access Tokens
 
 ```rust
-use square_idp_sdk::{bearer_token, Config, SquareIdpClient, VerifyOptions};
+use base_idp::{bearer_token, Config, BaseIdPClient, VerifyOptions};
 
-async fn verify(auth_header: Option<&str>) -> Result<(), square_idp_sdk::Error> {
-    let client = SquareIdpClient::new(Config::from_env()?)?;
+async fn verify(auth_header: Option<&str>) -> Result<(), base_idp::Error> {
+    let client = BaseIdPClient::new(Config::from_env()?)?;
     let token = bearer_token(auth_header)?;
 
     let principal = client
@@ -54,7 +77,7 @@ async fn verify(auth_header: Option<&str>) -> Result<(), square_idp_sdk::Error> 
 ```rust
 let auth_url = client.authorize_url(Default::default())?;
 let tokens = client
-    .exchange_code(square_idp_sdk::TokenOptions {
+    .exchange_code(base_idp::TokenOptions {
         code,
         ..Default::default()
     })

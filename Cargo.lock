@@ -24,6 +24,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
+name = "base-idp"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "chrono",
+ "ed25519-dalek",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "url",
+]
+
+[[package]]
 name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -995,20 +1009,6 @@ checksum = "d91ed6c858b01f942cd56b37a94b3e0a1798290327d1236e4d9cf4eaca44d29d"
 dependencies = [
  "base64ct",
  "der",
-]
-
-[[package]]
-name = "square-idp-sdk"
-version = "0.1.0"
-dependencies = [
- "base64",
- "chrono",
- "ed25519-dalek",
- "reqwest",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "url",
 ]
 
 [[package]]

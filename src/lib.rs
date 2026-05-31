@@ -8,27 +8,34 @@ pub use paseto::{bearer_token, unsafe_footer_kid, verify_paseto_v4_public};
 pub use types::*;
 
 #[cfg(feature = "reqwest")]
-pub use client::SquareIdpClient;
+pub use client::BaseIdPClient;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("square idp invalid config: {0}")]
+    #[error("base idp invalid config: {0}")]
     InvalidConfig(String),
-    #[error("square idp discovery failed: {0}")]
+    #[error("base idp config discovery failed: {0}")]
+    ConfigDiscovery(String),
+    #[error("base idp discovery failed: {0}")]
     Discovery(String),
-    #[error("square idp key fetch failed: {0}")]
+    #[error("base idp key fetch failed: {0}")]
     KeyFetch(String),
-    #[error("square idp token exchange failed: {0}")]
+    #[error("base idp token exchange failed: {0}")]
     TokenExchange(String),
-    #[error("square idp missing bearer token")]
+    #[error("base idp missing bearer token")]
     MissingBearer,
-    #[error("square idp invalid token: {0}")]
+    #[error("base idp invalid token: {0}")]
     InvalidToken(String),
-    #[error("square idp insufficient scope: {0}")]
+    #[error("base idp insufficient scope: {0}")]
     InsufficientScope(String),
 }
 
 pub fn authorize_url(config: &Config, options: AuthorizeOptions) -> Result<String, Error> {
+    if config.client_id.is_empty() {
+        return Err(Error::InvalidConfig(
+            "client is not resolved; call resolve_config".to_string(),
+        ));
+    }
     let mut url = url::Url::parse(&format!(
         "{}/oauth2/authorize",
         config.issuer.trim_end_matches('/')
@@ -55,6 +62,9 @@ pub fn authorize_url(config: &Config, options: AuthorizeOptions) -> Result<Strin
         }
         if let Some(nonce) = options.nonce {
             query.append_pair("nonce", &nonce);
+        }
+        if let Some(auth_session_id) = options.auth_session_id {
+            query.append_pair("auth_session_id", &auth_session_id);
         }
         if let Some(challenge) = options.code_challenge {
             query.append_pair("code_challenge", &challenge);
