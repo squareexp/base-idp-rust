@@ -12,20 +12,14 @@ base-idp = { path = "../base/sdk/rust" }
 
 After publishing, replace with crates.io version.
 
-## Required Environment
+## Minimal Environment
 
 ```env
-BASE_IDP_ISSUER=https://authlayer.squareexp.com
 BASE_IDP_CLIENT_ID=<your-client-id>
 BASE_IDP_CLIENT_SECRET=<your-client-secret-if-confidential>
-BASE_IDP_REDIRECT_URI=<exact-registered-callback-url>
-BASE_IDP_SCOPES="openid profile <product>:read <product>:write"
-BASE_IDP_ALLOWED_AUTH_METHODS="password magic_link"
-BASE_IDP_REQUESTED_CLAIMS="email profile"
-BASE_IDP_AUDIENCE=square-experience
 ```
 
-Get these values from Base client registration.
+That is enough for most services. Base resolves redirect URIs, scopes, audience, and auth methods from the client registration.
 `BASE_IDP_SECRET` remains a backward-compatible alias in some SDKs, but `BASE_IDP_CLIENT_SECRET` is the preferred secret name.
 
 ## Fast Init

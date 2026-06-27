@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_AUDIENCE: &str = "square-experience";
+pub const DEFAULT_ISSUER: &str = "https://authlayer.square.com";
+pub const DEFAULT_LOCAL_ISSUER: &str = "http://localhost:8080";
 pub const DEFAULT_IMPLICIT_ASSERTION: &str = "square-experience:idp:access:v1";
 
 #[derive(Clone, Debug)]
@@ -52,11 +54,11 @@ pub struct ClientConfigResponse {
 
 impl Config {
     pub fn from_env() -> Result<Self, crate::Error> {
+        let client_id = required_env("BASE_IDP_CLIENT_ID")?;
+        let issuer = resolve_issuer_from_env();
         Ok(Self {
-            key: required_env("BASE_IDP_KEY")?,
-            issuer: required_env("BASE_IDP_ISSUER")?
-                .trim_end_matches('/')
-                .to_string(),
+            key: client_id.clone(),
+            issuer,
             secret: std::env::var("BASE_IDP_CLIENT_SECRET")
                 .ok()
                 .filter(|value| !value.is_empty())
@@ -65,7 +67,7 @@ impl Config {
                         .ok()
                         .filter(|value| !value.is_empty())
                 }),
-            client_id: String::new(),
+            client_id,
             redirect_uri: String::new(),
             scopes: Vec::new(),
             audience: String::new(),
@@ -236,4 +238,26 @@ fn required_env(name: &str) -> Result<String, crate::Error> {
         .ok()
         .filter(|value| !value.is_empty())
         .ok_or_else(|| crate::Error::InvalidConfig(format!("{name} is required")))
+}
+
+pub fn resolve_issuer_from_env() -> String {
+    if let Ok(value) = std::env::var("BASE_IDP_ISSUER") {
+        if !value.trim().is_empty() {
+            return value.trim_end_matches('/').to_string();
+        }
+    }
+    let node_env = std::env::var("NODE_ENV").ok();
+    let app_env = std::env::var("APP_ENV").ok();
+    if matches_env(node_env.as_deref()) || matches_env(app_env.as_deref()) {
+        DEFAULT_LOCAL_ISSUER.to_string()
+    } else {
+        DEFAULT_ISSUER.to_string()
+    }
+}
+
+fn matches_env(value: Option<&str>) -> bool {
+    matches!(
+        value.map(|v| v.trim().to_lowercase()).as_deref(),
+        Some("dev" | "development" | "local")
+    )
 }

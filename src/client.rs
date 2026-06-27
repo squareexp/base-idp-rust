@@ -17,14 +17,9 @@ pub struct BaseIdPClient {
 
 impl BaseIdPClient {
     pub fn new(config: Config) -> Result<Self, Error> {
-        if config.key.is_empty() {
+        if config.client_id.is_empty() && config.key.is_empty() {
             return Err(Error::InvalidConfig(
-                "base key is required (set BASE_IDP_KEY)".to_string(),
-            ));
-        }
-        if config.issuer.is_empty() {
-            return Err(Error::InvalidConfig(
-                "issuer is required (set BASE_IDP_ISSUER)".to_string(),
+                "BASE_IDP_CLIENT_ID is required".to_string(),
             ));
         }
         Ok(Self {
@@ -47,33 +42,55 @@ impl BaseIdPClient {
     }
 
     pub async fn resolve_config(&self) -> Result<Config, Error> {
-        let mut cfg = self.config.write().map_err(|err| {
-            Error::InvalidConfig(format!("lock poisoned: {err}"))
-        })?;
+        let mut cfg = self
+            .config
+            .write()
+            .map_err(|err| Error::InvalidConfig(format!("lock poisoned: {err}")))?;
         if cfg.resolved {
             return Ok(cfg.clone());
         }
 
-        let url = format!(
-            "{}/v1/client-config?key={}",
-            cfg.issuer.trim_end_matches('/'),
-            urlencoding(&cfg.key)
-        );
+        let issuer = if cfg.issuer.is_empty() {
+            crate::types::resolve_issuer_from_env()
+        } else {
+            cfg.issuer.trim_end_matches('/').to_string()
+        };
 
-        let response: ClientConfigResponse = self
-            .http
-            .get(&url)
-            .header("Accept", "application/json")
-            .send()
-            .await
-            .map_err(|err| Error::ConfigDiscovery(err.to_string()))?
-            .error_for_status()
-            .map_err(|err| Error::ConfigDiscovery(err.to_string()))?
-            .json()
-            .await
-            .map_err(|err| Error::ConfigDiscovery(err.to_string()))?;
+        let response: ClientConfigResponse = if !cfg.client_id.is_empty() {
+            self.http
+                .post(format!("{issuer}/v1/client-config"))
+                .header("Accept", "application/json")
+                .json(&serde_json::json!({
+                    "client_id": cfg.client_id,
+                    "secret": cfg.secret,
+                }))
+                .send()
+                .await
+                .map_err(|err| Error::ConfigDiscovery(err.to_string()))?
+                .error_for_status()
+                .map_err(|err| Error::ConfigDiscovery(err.to_string()))?
+                .json()
+                .await
+                .map_err(|err| Error::ConfigDiscovery(err.to_string()))?
+        } else {
+            let url = format!("{issuer}/v1/client-config?key={}", urlencoding(&cfg.key));
+            self.http
+                .get(&url)
+                .header("Accept", "application/json")
+                .send()
+                .await
+                .map_err(|err| Error::ConfigDiscovery(err.to_string()))?
+                .error_for_status()
+                .map_err(|err| Error::ConfigDiscovery(err.to_string()))?
+                .json()
+                .await
+                .map_err(|err| Error::ConfigDiscovery(err.to_string()))?
+        };
 
         cfg.issuer = response.issuer.trim_end_matches('/').to_string();
+        if cfg.key.is_empty() {
+            cfg.key = response.client_id.clone();
+        }
         cfg.client_id = response.client_id;
         cfg.confidential = response.confidential;
         cfg.allowed_scopes = response.allowed_scopes.clone();
@@ -96,12 +113,14 @@ impl BaseIdPClient {
     }
 
     pub fn authorize_url(&self, options: AuthorizeOptions) -> Result<String, Error> {
-        let cfg = self.config.read().map_err(|err| {
-            Error::InvalidConfig(format!("lock poisoned: {err}"))
-        })?;
+        let cfg = self
+            .config
+            .read()
+            .map_err(|err| Error::InvalidConfig(format!("lock poisoned: {err}")))?;
         if !cfg.resolved {
             return Err(Error::InvalidConfig(
-                "client not resolved; call resolve_config() first or use an async method".to_string(),
+                "client not resolved; call resolve_config() first or use an async method"
+                    .to_string(),
             ));
         }
         authorize_url(&cfg, options)
@@ -119,7 +138,10 @@ impl BaseIdPClient {
             }
         }
 
-        let cfg = self.config.read().map_err(|_| Error::InvalidConfig("lock poisoned".to_string()))?;
+        let cfg = self
+            .config
+            .read()
+            .map_err(|_| Error::InvalidConfig("lock poisoned".to_string()))?;
         let endpoint = format!(
             "{}/.well-known/square-identity",
             cfg.issuer.trim_end_matches('/')
@@ -186,7 +208,10 @@ impl BaseIdPClient {
                 "authorization code is required".to_string(),
             ));
         }
-        let cfg = self.config.read().map_err(|_| Error::InvalidConfig("lock poisoned".to_string()))?;
+        let cfg = self
+            .config
+            .read()
+            .map_err(|_| Error::InvalidConfig("lock poisoned".to_string()))?;
         let mut form = vec![
             ("grant_type", "authorization_code".to_string()),
             ("code", options.code),
@@ -214,7 +239,10 @@ impl BaseIdPClient {
                 "refresh token is required".to_string(),
             ));
         }
-        let cfg = self.config.read().map_err(|_| Error::InvalidConfig("lock poisoned".to_string()))?;
+        let cfg = self
+            .config
+            .read()
+            .map_err(|_| Error::InvalidConfig("lock poisoned".to_string()))?;
         let mut form = vec![
             ("grant_type", "refresh_token".to_string()),
             ("refresh_token", options.refresh_token),
@@ -236,7 +264,10 @@ impl BaseIdPClient {
     ) -> Result<Principal, Error> {
         self.resolve_config().await?;
         let keys = self.public_keys(false).await?;
-        let cfg = self.config.read().map_err(|_| Error::InvalidConfig("lock poisoned".to_string()))?;
+        let cfg = self
+            .config
+            .read()
+            .map_err(|_| Error::InvalidConfig("lock poisoned".to_string()))?;
         verify_paseto_v4_public(token, &keys, &cfg, options)
     }
 
