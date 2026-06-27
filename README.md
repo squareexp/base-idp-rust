@@ -88,3 +88,8 @@ The SDK validates:
 - required scopes
 
 Public keys are discovered from Base and cached by the async client.
+
+
+## Verification Support
+
+This SDK fully supports local validation of PASETO v4.public tokens using discovered and cached Ed25519 keys, ensuring secure offline checking of audience, issuer, expiry, and scopes.
